@@ -16,8 +16,13 @@ from pptx.util import Inches
 import os
 from pptx.dml.color import RGBColor
 from pptx.util import Pt
+from logger_config import setup_logger
+
+# Setup logger
+logger = setup_logger('mcp_server', 'mcp_server.log')
 
 # instantiate an MCP server client
+logger.info('Initializing MCP server with Calculator configuration')
 mcp = FastMCP("Calculator")
 
 # DEFINE TOOLS
@@ -26,28 +31,36 @@ mcp = FastMCP("Calculator")
 @mcp.tool()
 def add(a: int, b: int) -> int:
     """Add two numbers"""
-    print("CALLED: add(a: int, b: int) -> int:")
-    return int(a + b)
+    logger.debug(f'Adding numbers: {a} + {b}')
+    result = int(a + b)
+    logger.info(f'Addition result: {result}')
+    return result
 
 @mcp.tool()
 def add_list(l: list) -> int:
     """Add all numbers in a list"""
-    print("CALLED: add(l: list) -> int:")
-    return sum(l)
+    logger.debug(f'Adding list of numbers: {l}')
+    result = sum(l)
+    logger.info(f'List addition result: {result}')
+    return result
 
 # subtraction tool
 @mcp.tool()
 def subtract(a: int, b: int) -> int:
     """Subtract two numbers"""
-    print("CALLED: subtract(a: int, b: int) -> int:")
-    return int(a - b)
+    logger.debug(f'Subtracting numbers: {a} - {b}')
+    result = int(a - b)
+    logger.info(f'Subtraction result: {result}')
+    return result
 
 # multiplication tool
 @mcp.tool()
 def multiply(a: int, b: int) -> int:
     """Multiply two numbers"""
-    print("CALLED: multiply(a: int, b: int) -> int:")
-    return int(a * b)
+    logger.debug(f'Multiplying numbers: {a} * {b}')
+    result = int(a * b)
+    logger.info(f'Multiplication result: {result}')
+    return result
 
 #  division tool
 @mcp.tool() 
@@ -67,50 +80,64 @@ def power(a: int, b: int) -> int:
 @mcp.tool()
 def sqrt(a: int) -> float:
     """Square root of a number"""
-    print("CALLED: sqrt(a: int) -> float:")
-    return float(a ** 0.5)
+    logger.debug(f'Computing square root of: {a}')
+    result = float(a ** 0.5)
+    logger.info(f'Square root result: {result}')
+    return result
 
 # cube root tool
 @mcp.tool()
 def cbrt(a: int) -> float:
     """Cube root of a number"""
-    print("CALLED: cbrt(a: int) -> float:")
-    return float(a ** (1/3))
+    logger.debug(f'Computing cube root of: {a}')
+    result = float(a ** (1/3))
+    logger.info(f'Cube root result: {result}')
+    return result
 
 # factorial tool
 @mcp.tool()
 def factorial(a: int) -> int:
     """factorial of a number"""
-    print("CALLED: factorial(a: int) -> int:")
-    return int(math.factorial(a))
+    logger.debug(f'Computing factorial of: {a}')
+    result = int(math.factorial(a))
+    logger.info(f'Factorial result: {result}')
+    return result
 
 # log tool
 @mcp.tool()
 def log(a: int) -> float:
     """log of a number"""
-    print("CALLED: log(a: int) -> float:")
-    return float(math.log(a))
+    logger.debug(f'Computing natural log of: {a}')
+    result = float(math.log(a))
+    logger.info(f'Natural log result: {result}')
+    return result
 
 # remainder tool
 @mcp.tool()
 def remainder(a: int, b: int) -> int:
     """remainder of two numbers divison"""
-    print("CALLED: remainder(a: int, b: int) -> int:")
-    return int(a % b)
+    logger.debug(f'Computing remainder of: {a} / {b}')
+    result = int(a % b)
+    logger.info(f'Remainder result: {result}')
+    return result
 
 # sin tool
 @mcp.tool()
 def sin(a: int) -> float:
     """sin of a number"""
-    print("CALLED: sin(a: int) -> float:")
-    return float(math.sin(a))
+    logger.debug(f'Computing sine of: {a}')
+    result = float(math.sin(a))
+    logger.info(f'Sine result: {result}')
+    return result
 
 # cos tool
 @mcp.tool()
 def cos(a: int) -> float:
     """cos of a number"""
-    print("CALLED: cos(a: int) -> float:")
-    return float(math.cos(a))
+    logger.debug(f'Computing cosine of: {a}')
+    result = float(math.cos(a))
+    logger.info(f'Cosine result: {result}')
+    return result
 
 # tan tool
 @mcp.tool()

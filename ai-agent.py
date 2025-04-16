@@ -6,12 +6,22 @@ import asyncio
 from google import genai
 from concurrent.futures import TimeoutError
 from functools import partial
+from logger_config import setup_logger
+
+# Setup logger
+logger = setup_logger('ai_agent', 'ai_agent.log')
 
 # Load environment variables from .env file
+logger.info('Loading environment variables')
 load_dotenv()
 
 # Access your API key and initialize Gemini client correctly
 api_key = os.getenv("GEMINI_API_KEY")
+if not api_key:
+    logger.error('GEMINI_API_KEY not found in environment variables')
+    raise ValueError('GEMINI_API_KEY not found')
+
+logger.info('Initializing Gemini client')
 client = genai.Client(api_key=api_key)
 
 max_iterations = 10
@@ -22,7 +32,8 @@ powerpoint_opened = False
 
 async def generate_with_timeout(client, prompt, timeout=10):
     """Generate content with a timeout"""
-    print("Starting LLM generation...")
+    logger.info('Starting LLM generation')
+    logger.debug(f'Prompt length: {len(prompt)}')
     try:
         # Convert the synchronous generate_content call to run in a thread
         loop = asyncio.get_event_loop()
@@ -36,22 +47,24 @@ async def generate_with_timeout(client, prompt, timeout=10):
             ),
             timeout=timeout
         )
-        print("LLM generation completed")
+        logger.info('LLM generation completed successfully')
         return response
     except TimeoutError:
-        print("LLM generation timed out!")
+        logger.error(f'LLM generation timed out after {timeout} seconds')
         raise
     except Exception as e:
-        print(f"Error in LLM generation: {e}")
+        logger.error(f'Error in LLM generation: {str(e)}')
         raise
 
 def reset_state():
     """Reset all global variables to their initial state"""
     global last_response, iteration, iteration_response, powerpoint_opened
+    logger.debug('Resetting global state variables')
     last_response = None
     iteration = 0
     iteration_response = []
     powerpoint_opened = False
+    logger.info('Global state reset completed')
 
 async def main():
     max_retries = 3
@@ -60,33 +73,35 @@ async def main():
     while retry_count < max_retries:
         try:
             reset_state()  # Reset at the start of main
-            print("Starting main execution...")
+            logger.info("Starting main execution")
             
             # Create a single MCP server connection
-            print("Establishing connection to MCP server...")
+            logger.info("Establishing connection to MCP server")
             server_params = StdioServerParameters(
                 command="python",
                 args=["mcp-server.py", "dev"]  # Add "dev" argument
             )
 
             async with stdio_client(server_params) as (read, write):
-                print("Connection established, creating session...")
+                logger.info("Connection established, creating session")
                 async with ClientSession(read, write) as session:
-                    print("Session created, initializing...")
+                    logger.info("Session created, initializing")
                     try:
                         await session.initialize()
+                        logger.info("Session initialized successfully")
                     except Exception as e:
-                        print(f"Failed to initialize session: {e}")
+                        logger.error(f"Failed to initialize session: {str(e)}")
                         continue
                     
                     # Get available tools
-                    print("Requesting tool list...")
+                    logger.info("Requesting tool list")
                     try:
                         tools_result = await session.list_tools()
                         tools = tools_result.tools
-                        print(f"Successfully retrieved {len(tools)} tools")
+                        logger.info(f"Successfully retrieved {len(tools)} tools")
+                        logger.debug(f"Available tools: {[tool.name for tool in tools]}")
                     except Exception as e:
-                        print(f"Failed to get tool list: {e}")
+                        logger.error(f"Failed to get tool list: {str(e)}")
                         continue
                     
                     # Create system prompt with available tools
@@ -303,25 +318,25 @@ Accepted array formats:
                                     elif param_type == 'number':
                                         arguments[param_name] = float(value)
                                     elif param_type == 'array':
-                                        if isinstance(value, list):
-                                            arguments[param_name] = value
-                                        elif isinstance(value, str):
-                                            # Handle string representation of array
-                                            if value.startswith('[') and value.endswith(']'):
-                                                array_str = value.strip('[]')
-                                                if array_str:
-                                                    arguments[param_name] = [int(x.strip()) for x in array_str.split(',')]
+                                        logger.debug(f"Processing array parameter {param_name} with value {value}")
+                                        try:
+                                            # Handle result from strings_to_chars_to_int function
+                                            if isinstance(value, (list, tuple)):
+                                                arguments[param_name] = [int(x) for x in value]
+                                            elif isinstance(value, str):
+                                                # Handle string representation of array
+                                                if value.startswith('[') and value.endswith(']'):
+                                                    array_str = value.strip('[]')
+                                                    arguments[param_name] = [int(x.strip()) for x in array_str.split(',')] if array_str else []
                                                 else:
-                                                    arguments[param_name] = []
+                                                    # Handle comma-separated string without brackets
+                                                    arguments[param_name] = [int(x.strip()) for x in value.split(',')] if ',' in value else [int(value)]
                                             else:
-                                                # If it's a comma-separated string without brackets
-                                                if ',' in value:
-                                                    arguments[param_name] = [int(x.strip()) for x in value.split(',')]
-                                                else:
-                                                    # If it's a single value, make it a single-item list
-                                                    arguments[param_name] = [int(value)]
-                                        else:
-                                            raise ValueError(f"Invalid array format for parameter {param_name}")
+                                                logger.error(f"Invalid type for array parameter {param_name}: {type(value)}")
+                                                raise ValueError(f"Invalid array format for parameter {param_name}")
+                                        except (ValueError, TypeError) as e:
+                                            logger.error(f"Error converting value to array: {str(e)}")
+                                            raise ValueError(f"Failed to convert {value} to integer array: {str(e)}")
                                     else:
                                         arguments[param_name] = str(value)
 
