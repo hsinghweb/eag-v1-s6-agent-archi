@@ -54,6 +54,7 @@ async def generate_with_timeout(client, prompt, timeout=10):
     """Generate content with a timeout"""
     logger.info('Starting LLM generation')
     logger.debug(f'Prompt length: {len(prompt)}')
+    logger.info(f'Prompt request: {prompt}')
     try:
         # Convert the synchronous generate_content call to run in a thread
         loop = asyncio.get_event_loop()
@@ -68,6 +69,7 @@ async def generate_with_timeout(client, prompt, timeout=10):
             timeout=timeout
         )
         logger.info('LLM generation completed successfully')
+        logger.info(f'Prompt response: {response.text}')
         return response
     except TimeoutError:
         logger.error(f'LLM generation timed out after {timeout} seconds')

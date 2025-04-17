@@ -66,15 +66,19 @@ def multiply(a: int, b: int) -> int:
 @mcp.tool() 
 def divide(a: int, b: int) -> float:
     """Divide two numbers"""
-    print("CALLED: divide(a: int, b: int) -> float:")
-    return float(a / b)
+    logger.info(f'Starting tool execution: divide with params a={a}, b={b}')
+    result = float(a / b)
+    logger.info(f'Tool execution completed: divide with result {result}')
+    return result
 
 # power tool
 @mcp.tool()
 def power(a: int, b: int) -> int:
     """Power of two numbers"""
-    print("CALLED: power(a: int, b: int) -> int:")
-    return int(a ** b)
+    logger.info(f'Starting tool execution: power with params a={a}, b={b}')
+    result = int(a ** b)
+    logger.info(f'Tool execution completed: power with result {result}')
+    return result
 
 # square root tool
 @mcp.tool()
@@ -143,46 +147,58 @@ def cos(a: int) -> float:
 @mcp.tool()
 def tan(a: int) -> float:
     """tan of a number"""
-    print("CALLED: tan(a: int) -> float:")
-    return float(math.tan(a))
+    logger.info(f'Starting tool execution: tan with param a={a}')
+    result = float(math.tan(a))
+    logger.info(f'Tool execution completed: tan with result {result}')
+    return result
 
 # mine tool
 @mcp.tool()
 def mine(a: int, b: int) -> int:
     """special mining tool"""
-    print("CALLED: mine(a: int, b: int) -> int:")
-    return int(a - b - b)
+    logger.info(f'Starting tool execution: mine with params a={a}, b={b}')
+    result = int(a - b - b)
+    logger.info(f'Tool execution completed: mine with result {result}')
+    return result
 
 @mcp.tool()
 def create_thumbnail(image_path: str) -> Image:
     """Create a thumbnail from an image"""
-    print("CALLED: create_thumbnail(image_path: str) -> Image:")
+    logger.info(f'Starting tool execution: create_thumbnail with param image_path={image_path}')
     img = PILImage.open(image_path)
     img.thumbnail((100, 100))
-    return Image(data=img.tobytes(), format="png")
+    result = Image(data=img.tobytes(), format="png")
+    logger.info(f'Tool execution completed: create_thumbnail with result {result}')
+    return result
 
 @mcp.tool()
 def strings_to_chars_to_int(string: str) -> list[int]:
     """Return the ASCII values of the characters in a word"""
-    print("CALLED: strings_to_chars_to_int(string: str) -> list[int]:")
-    return [int(ord(char)) for char in string]
+    logger.info(f'Starting tool execution: strings_to_chars_to_int with param string={string}')
+    result = [int(ord(char)) for char in string]
+    logger.info(f'Tool execution completed: strings_to_chars_to_int with result {result}')
+    return result
 
 @mcp.tool()
 def int_list_to_exponential_sum(int_list: list) -> float:
     """Return sum of exponentials of numbers in a list"""
-    print("CALLED: int_list_to_exponential_sum(int_list: list) -> float:")
-    return sum(math.exp(i) for i in int_list)
+    logger.info(f'Starting tool execution: int_list_to_exponential_sum with param int_list={int_list}')
+    result = sum(math.exp(i) for i in int_list)
+    logger.info(f'Tool execution completed: int_list_to_exponential_sum with result {result}')
+    return result
 
 @mcp.tool()
 def fibonacci_numbers(n: int) -> list:
     """Return the first n Fibonacci Numbers"""
-    print("CALLED: fibonacci_numbers(n: int) -> list:")
+    logger.info(f'Starting tool execution: fibonacci_numbers with param n={n}')
     if n <= 0:
         return []
     fib_sequence = [0, 1]
     for _ in range(2, n):
         fib_sequence.append(fib_sequence[-1] + fib_sequence[-2])
-    return fib_sequence[:n]
+    result = fib_sequence[:n]
+    logger.info(f'Tool execution completed: fibonacci_numbers with result {result}')
+    return result
 
 @mcp.tool()
 async def close_powerpoint() -> dict:
