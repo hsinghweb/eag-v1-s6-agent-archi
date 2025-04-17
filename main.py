@@ -165,7 +165,7 @@ async def main():
                     system_prompt = """You are a math agent that solves problems using structured, step-by-step reasoning and visualizes the results using PowerPoint. You must reason iteratively and explicitly separate calculation from visualization steps.
 
 Available tools:
-{tools_description}
+""" + tools_description + """"
 
 Your workflow must strictly follow this structured loop for each problem:
 1. Begin by identifying the necessary computations and perform **only** mathematical calculations first using a function call in JSON format:
