@@ -7,6 +7,26 @@ from google import genai
 from concurrent.futures import TimeoutError
 from functools import partial
 from logger_config import setup_logger
+from pydantic import BaseModel, Field, conlist
+from typing import List, Union, Optional, Literal
+
+# Pydantic Models for Input/Output Validation
+class FunctionCallInput(BaseModel):
+    type: Literal["function_call"] = Field(default="function_call")
+    function: str
+    params: dict
+
+class PowerPointOperationInput(BaseModel):
+    type: Literal["powerpoint"] = Field(default="powerpoint")
+    operation: str
+    params: dict
+
+class FinalAnswerOutput(BaseModel):
+    type: Literal["final_answer"] = Field(default="final_answer")
+    value: Union[str, int, float]
+
+class ArrayInput(BaseModel):
+    values: List[int] = Field(..., min_items=1)
 
 # Setup logger
 logger = setup_logger('ai_agent', 'ai_agent.log')
@@ -151,7 +171,7 @@ Your workflow must strictly follow this structured loop for each problem:
    - For exponential sums, use 'int_list_to_exponential_sum'
 2. Once calculations are complete, proceed to PowerPoint visualization in JSON format:
    - Begin with PowerPoint open operation
-   - Draw a rectangle to highlight results using coordinates (x1=2, y1=2, x2=7, y2=5)
+   - Draw a rectangle to highlight results using coordinates (x1=2, y1=2, x2=7, y2=5) with 'draw_rectangle' tool
    - Display the final computed value
    - End with PowerPoint close operation
 
@@ -263,14 +283,11 @@ Accepted array formats:
                                     raise ValueError(f"Invalid response type. Expected one of {valid_types}")
                                 
                                 if response_json['type'] == 'function_call':
-                                    if 'function' not in response_json or 'params' not in response_json:
-                                        raise ValueError("Invalid function_call format")
+                                    FunctionCallInput(**response_json)
                                 elif response_json['type'] == 'powerpoint':
-                                    if 'operation' not in response_json or 'params' not in response_json:
-                                        raise ValueError("Invalid powerpoint operation format")
+                                    PowerPointOperationInput(**response_json)
                                 elif response_json['type'] == 'final_answer':
-                                    if 'value' not in response_json:
-                                        raise ValueError("Invalid final_answer format")
+                                    FinalAnswerOutput(**response_json)
                             except json.JSONDecodeError as e:
                                 print(f"Failed to parse JSON response: {e}")
                                 break
@@ -302,43 +319,45 @@ Accepted array formats:
                                 print(f"[Calling Tool] Schema properties: {schema_properties}")
 
                                 for param_name, param_info in schema_properties.items():
-                                    if param_name not in params:  # Check if parameter is provided
+                                    # Use the correct parameter name from the tool's schema
+                                    param_value = params.get(param_name, params.get('numbers')) if func_name == 'int_list_to_exponential_sum' else params.get(param_name)
+                                    
+                                    if param_value is None:  # Check if parameter is provided
                                         if param_name in tool.inputSchema.get('required', []):
                                             raise ValueError(f"Required parameter {param_name} not provided for {func_name}")
                                         continue
                                         
-                                    value = params[param_name]
                                     param_type = param_info.get('type', 'string')
                                     
-                                    print(f"[Calling Tool] Converting parameter {param_name} with value {value} to type {param_type}")
+                                    print(f"[Calling Tool] Converting parameter {param_name} with value {param_value} to type {param_type}")
                                     
                                     # Convert the value to the correct type based on the schema
                                     if param_type == 'integer':
-                                        arguments[param_name] = int(value)
+                                        arguments[param_name] = int(param_value)
                                     elif param_type == 'number':
-                                        arguments[param_name] = float(value)
+                                        arguments[param_name] = float(param_value)
                                     elif param_type == 'array':
-                                        logger.debug(f"Processing array parameter {param_name} with value {value}")
+                                        logger.debug(f"Processing array parameter {param_name} with value {param_value}")
                                         try:
                                             # Handle result from strings_to_chars_to_int function
-                                            if isinstance(value, (list, tuple)):
-                                                arguments[param_name] = [int(x) for x in value]
-                                            elif isinstance(value, str):
+                                            if isinstance(param_value, (list, tuple)):
+                                                arguments[param_name] = [int(x) for x in param_value]
+                                            elif isinstance(param_value, str):
                                                 # Handle string representation of array
-                                                if value.startswith('[') and value.endswith(']'):
-                                                    array_str = value.strip('[]')
+                                                if param_value.startswith('[') and param_value.endswith(']'):
+                                                    array_str = param_value.strip('[]')
                                                     arguments[param_name] = [int(x.strip()) for x in array_str.split(',')] if array_str else []
                                                 else:
                                                     # Handle comma-separated string without brackets
-                                                    arguments[param_name] = [int(x.strip()) for x in value.split(',')] if ',' in value else [int(value)]
+                                                    arguments[param_name] = [int(x.strip()) for x in param_value.split(',')] if ',' in param_value else [int(param_value)]
                                             else:
-                                                logger.error(f"Invalid type for array parameter {param_name}: {type(value)}")
+                                                logger.error(f"Invalid type for array parameter {param_name}: {type(param_value)}")
                                                 raise ValueError(f"Invalid array format for parameter {param_name}")
                                         except (ValueError, TypeError) as e:
                                             logger.error(f"Error converting value to array: {str(e)}")
-                                            raise ValueError(f"Failed to convert {value} to integer array: {str(e)}")
+                                            raise ValueError(f"Failed to convert {param_value} to integer array: {str(e)}")
                                     else:
-                                        arguments[param_name] = str(value)
+                                        arguments[param_name] = str(param_value)
 
                                 print(f"[Calling Tool] Final arguments: {arguments}")
                                 print(f"[Calling Tool] Calling tool {func_name}")
