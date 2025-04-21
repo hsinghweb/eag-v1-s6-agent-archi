@@ -7,30 +7,14 @@ from google import genai
 from concurrent.futures import TimeoutError
 from functools import partial
 from logger_config import setup_logger
-from pydantic import BaseModel, Field, conlist
-from typing import List, Union, Optional, Literal
+from perception import (
+    FunctionCallInput, PowerPointOperationInput, FinalAnswerOutput,
+    clean_llm_response, parse_and_validate_response, format_tool_response
+)
 from prompt_config import MATH_AGENT_SYSTEM_PROMPT
 
-# Pydantic Models for Input/Output Validation
-class FunctionCallInput(BaseModel):
-    type: Literal["function_call"] = Field(default="function_call")
-    function: str
-    params: dict
-
-class PowerPointOperationInput(BaseModel):
-    type: Literal["powerpoint"] = Field(default="powerpoint")
-    operation: str
-    params: dict
-
-class FinalAnswerOutput(BaseModel):
-    type: Literal["final_answer"] = Field(default="final_answer")
-    value: Union[str, int, float]
-
-class ArrayInput(BaseModel):
-    values: List[int] = Field(..., min_items=1)
-
 # Setup logger
-logger = setup_logger('ai_agent', 'ai_agent.log')
+logger = setup_logger('agent', 'agent.log')
 
 # Load environment variables from .env file
 logger.info('Loading environment variables')
@@ -162,10 +146,6 @@ async def main():
                         tools_description = "Error loading tools"
                     
                     print("Creating system prompt...")
-                    # Create system prompt with tools description
-                    # Use the MATH_AGENT_SYSTEM_PROMPT template to create the system prompt
-                    # Ensure the tools_description is formatted correctly
-                    # and passed to the system prompt
                     system_prompt = MATH_AGENT_SYSTEM_PROMPT + """Available Tools: """ + tools_description
                     print("System prompt created", system_prompt)
 
@@ -189,57 +169,23 @@ async def main():
                         prompt = f"{system_prompt}\n\nQuery: {current_query}"
                         try:
                             response = await generate_with_timeout(client, prompt)
-                            # Remove markdown code block formatting if present
-                            response_text = response.text.strip()
-                            # Remove markdown formatting and clean up JSON string
-                            if '```' in response_text:
-                                response_text = response_text.split('```')[1] if len(response_text.split('```')) > 1 else response_text
-                            response_text = response_text.replace('json\n', '').strip()
-                            # Remove any leading/trailing whitespace or quotes
-                            response_text = response_text.strip('`').strip('"').strip()
+                            response_text = clean_llm_response(response.text)
                             print(f"LLM Response: {response_text}")
                             
-                            # Parse the JSON response
-                            import json
+                            # Parse and validate the response
                             try:
-                                # Try to parse the cleaned response text
-                                try:
-                                    response_json = json.loads(response_text)
-                                except json.JSONDecodeError:
-                                    # If initial parse fails, try to extract JSON from the text
-                                    import re
-                                    json_match = re.search(r'\{[^}]+\}', response_text)
-                                    if json_match:
-                                        response_text = json_match.group(0)
-                                        response_json = json.loads(response_text)
-                                    else:
-                                        raise ValueError("No valid JSON found in response")
-                                
-                                if not isinstance(response_json, dict) or 'type' not in response_json:
-                                    raise ValueError("Invalid response format")
-                                
-                                # Validate response against expected schemas
-                                valid_types = ['function_call', 'powerpoint', 'final_answer']
-                                if response_json['type'] not in valid_types:
-                                    raise ValueError(f"Invalid response type. Expected one of {valid_types}")
-                                
-                                if response_json['type'] == 'function_call':
-                                    FunctionCallInput(**response_json)
-                                elif response_json['type'] == 'powerpoint':
-                                    PowerPointOperationInput(**response_json)
-                                elif response_json['type'] == 'final_answer':
-                                    FinalAnswerOutput(**response_json)
-                            except json.JSONDecodeError as e:
-                                print(f"Failed to parse JSON response: {e}")
+                                response_json = parse_and_validate_response(response_text)
+                            except Exception as e:
+                                print(f"Failed to parse response: {e}")
                                 break
                             
                         except Exception as e:
                             print(f"Failed to get LLM response: {e}")
                             break
 
-                        if response_json['type'] == 'function_call':
-                            func_name = response_json['function']
-                            params = response_json['params']
+                        if response_json.type == 'function_call':
+                            func_name = response_json.function
+                            params = response_json.params
                             
                             print(f"[Calling Tool] Function name: {func_name}")
                             print(f"[Calling Tool] Parameters: {params}")
@@ -306,33 +252,8 @@ async def main():
                                 result = await session.call_tool(func_name, arguments=arguments)
                                 print(f"[Calling LLM] Raw result: {result}")
                                 
-                                # Get the full result content
-                                if hasattr(result, 'content'):
-                                    print(f"[Calling LLM] Result has content attribute")
-                                    # Handle multiple content items
-                                    if isinstance(result.content, list):
-                                        iteration_result = [
-                                            item.text if hasattr(item, 'text') else str(item)
-                                            for item in result.content
-                                        ]
-                                    else:
-                                        iteration_result = str(result.content)
-                                else:
-                                    print(f"[Calling LLM] Result has no content attribute")
-                                    iteration_result = str(result)
-                                    
-                                print(f"[Calling LLM] Final iteration result: {iteration_result}")
-                                
-                                # Format the response based on result type
-                                if isinstance(iteration_result, list):
-                                    result_str = f"[{', '.join(iteration_result)}]"
-                                else:
-                                    result_str = str(iteration_result)
-                                
-                                iteration_response.append(
-                                    f"In the {iteration + 1} iteration you called {func_name} with {arguments} parameters, "
-                                    f"and the function returned {result_str}."
-                                )
+                                response_str, iteration_result = format_tool_response(result, iteration, func_name, arguments)
+                                iteration_response.append(response_str)
                                 last_response = iteration_result
 
                             except Exception as e:
@@ -343,9 +264,9 @@ async def main():
                                 iteration_response.append(f"Error in iteration {iteration + 1}: {str(e)}")
                                 break
 
-                        elif response_json['type'] == 'powerpoint':
-                            operation = response_json['operation']
-                            params = response_json['params']
+                        elif response_json.type == 'powerpoint':
+                            operation = response_json.operation
+                            params = response_json.params
                             
                             print(f"[Calling Tool] PowerPoint operation: {operation}")
                             print(f"[Calling Tool] PowerPoint parameters: {params}")
@@ -404,29 +325,8 @@ async def main():
                                     iteration_response.append(f"Unknown PowerPoint operation: {operation}")
                                     continue
                                 
-                                # Get the full result content
-                                if hasattr(result, 'content'):
-                                    # Handle multiple content items
-                                    if isinstance(result.content, list):
-                                        iteration_result = [
-                                            item.text if hasattr(item, 'text') else str(item)
-                                            for item in result.content
-                                        ]
-                                    else:
-                                        iteration_result = str(result.content)
-                                else:
-                                    iteration_result = str(result)
-                                    
-                                # Format the response based on result type
-                                if isinstance(iteration_result, list):
-                                    result_str = f"[{', '.join(iteration_result)}]"
-                                else:
-                                    result_str = str(iteration_result)
-                                
-                                iteration_response.append(
-                                    f"In the {iteration + 1} iteration you performed PowerPoint operation {operation} "
-                                    f"with {params} parameters, and the operation returned {result_str}."
-                                )
+                                response_str, iteration_result = format_tool_response(result, iteration)
+                                iteration_response.append(response_str)
                                 last_response = iteration_result
                                 
                             except Exception as e:
@@ -434,8 +334,8 @@ async def main():
                                 iteration_response.append(f"Error in PowerPoint operation: {str(e)}")
                                 break
                                 
-                        elif response_json['type'] == 'final_answer':
-                            value = response_json['value']
+                        elif response_json.type == 'final_answer':
+                            value = response_json.value
                             iteration_response.append(f"Final answer: {value}")
                             break
                             
