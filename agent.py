@@ -8,13 +8,16 @@ from concurrent.futures import TimeoutError
 from functools import partial
 from logger_config import setup_logger
 from perception import (
-    FunctionCallInput, PowerPointOperationInput, FinalAnswerOutput,
     clean_llm_response, parse_and_validate_response, format_tool_response
 )
+from memory import Memory
 from prompt_config import MATH_AGENT_SYSTEM_PROMPT
 
 # Setup logger
-logger = setup_logger('agent', 'agent.log')
+logger = setup_logger('ai_agent', 'ai_agent.log')
+
+# Initialize global memory
+memory = Memory()
 
 # Load environment variables from .env file
 logger.info('Loading environment variables')
@@ -30,10 +33,6 @@ logger.info('Initializing Gemini client')
 client = genai.Client(api_key=api_key)
 
 max_iterations = 10
-last_response = None
-iteration = 0
-iteration_response = []
-powerpoint_opened = False
 
 async def generate_with_timeout(client, prompt, timeout=10):
     """Generate content with a timeout"""
@@ -64,13 +63,9 @@ async def generate_with_timeout(client, prompt, timeout=10):
         raise
 
 def reset_state():
-    """Reset all global variables to their initial state"""
-    global last_response, iteration, iteration_response, powerpoint_opened
-    logger.debug('Resetting global state variables')
-    last_response = None
-    iteration = 0
-    iteration_response = []
-    powerpoint_opened = False
+    """Reset all state using memory layer"""
+    logger.debug('Resetting global state')
+    memory.reset()
     logger.info('Global state reset completed')
 
 async def main():
@@ -86,7 +81,7 @@ async def main():
             logger.info("Establishing connection to MCP server")
             server_params = StdioServerParameters(
                 command="python",
-                args=["mcp-server.py", "dev"]  # Add "dev" argument
+                args=["mcp-server.py", "dev"]
             )
 
             async with stdio_client(server_params) as (read, write):
@@ -146,23 +141,19 @@ async def main():
                         tools_description = "Error loading tools"
                     
                     print("Creating system prompt...")
-                    system_prompt = MATH_AGENT_SYSTEM_PROMPT + """Available Tools: """ + tools_description
-                    print("System prompt created", system_prompt)
+                    system_prompt = MATH_AGENT_SYSTEM_PROMPT + """\nAvailable Tools: """ + tools_description
+                    print("System prompt created\n", system_prompt)
 
                     query = """Find the ASCII values of characters in HIMANSHU and then return sum of exponentials of those values. 
                     Also, create a PowerPoint presentation showing the Final Answer inside a rectangle box."""
                     print("Starting iteration loop...")
                     
-                    # Use global iteration variables
-                    global iteration, last_response, powerpoint_opened
-                    
-                    while iteration < max_iterations:
-                        print(f"\n--- Iteration {iteration + 1} ---")
-                        if last_response is None:
-                            current_query = query
-                        else:
-                            current_query = current_query + "\n\n" + " ".join(iteration_response)
-                            current_query = current_query + "  What should I do next?"
+                    while memory.current_iteration < max_iterations:
+                        print(f"\n--- Iteration {memory.current_iteration + 1} ---")
+                        
+                        # Get context from memory for the prompt
+                        context = memory.get_context_for_prompt()
+                        current_query = query if not context else f"{query}\n\n{context}"
 
                         # Get model's response with timeout
                         print("Preparing to generate LLM response...")
@@ -171,6 +162,9 @@ async def main():
                             response = await generate_with_timeout(client, prompt)
                             response_text = clean_llm_response(response.text)
                             print(f"LLM Response: {response_text}")
+                            
+                            # Store LLM response in memory
+                            memory.add_memory('llm_response', response_text)
                             
                             # Parse and validate the response
                             try:
@@ -252,16 +246,16 @@ async def main():
                                 result = await session.call_tool(func_name, arguments=arguments)
                                 print(f"[Calling LLM] Raw result: {result}")
                                 
-                                response_str, iteration_result = format_tool_response(result, iteration, func_name, arguments)
-                                iteration_response.append(response_str)
-                                last_response = iteration_result
+                                response_str, iteration_result = format_tool_response(result, memory.current_iteration, func_name, arguments)
+                                memory.add_memory('tool_result', iteration_result)
+                                memory.add_memory('iteration_response', response_str)
 
                             except Exception as e:
                                 print(f"[Calling LLM] Error details: {str(e)}")
                                 print(f"[Calling LLM] Error type: {type(e)}")
                                 import traceback
                                 traceback.print_exc()
-                                iteration_response.append(f"Error in iteration {iteration + 1}: {str(e)}")
+                                memory.add_memory('iteration_response', f"Error in iteration {memory.current_iteration + 1}: {str(e)}")
                                 break
 
                         elif response_json.type == 'powerpoint':
@@ -273,14 +267,14 @@ async def main():
                             
                             try:
                                 if operation == "open_powerpoint":
-                                    if not powerpoint_opened:
+                                    if not memory.is_powerpoint_open:
                                         result = await session.call_tool("open_powerpoint")
-                                        powerpoint_opened = True
+                                        memory.set_powerpoint_state(True)
                                     else:
-                                        iteration_response.append("PowerPoint is already open")
+                                        memory.add_memory('iteration_response', "PowerPoint is already open")
                                         continue
                                 elif operation == "draw_rectangle":
-                                    if powerpoint_opened:
+                                    if memory.is_powerpoint_open:
                                         try:
                                             result = await session.call_tool(
                                                 "draw_rectangle",
@@ -288,22 +282,18 @@ async def main():
                                             )
                                         except Exception as e:
                                             print(f"[Calling Tool] Error with rectangle parameters: {e}")
-                                            iteration_response.append(f"Error: Invalid rectangle parameters - {str(e)}")
+                                            memory.add_memory('iteration_response', f"Error: Invalid rectangle parameters - {str(e)}")
                                             continue
                                     else:
-                                        iteration_response.append("PowerPoint must be opened first")
+                                        memory.add_memory('iteration_response', "PowerPoint must be opened first")
                                         continue
                                 elif operation == "add_text_in_powerpoint":
-                                    if powerpoint_opened:
+                                    if memory.is_powerpoint_open:
                                         text = params.get('text', '')
-                                        # Handle newlines in JSON string
                                         
                                         # If this is the final result text, append the calculated value
                                         if "Final Result:" in text:
-                                            # Find the last calculation result from iteration_response
-                                            calc_result = next((resp.split("returned")[1].strip() 
-                                                for resp in reversed(iteration_response) 
-                                                if "returned" in resp), None)
+                                            calc_result = memory.get_last_calculation_result()
                                             if calc_result:
                                                 text = f"Final Result:\n{calc_result}"
                                         
@@ -312,42 +302,42 @@ async def main():
                                             arguments={"text": text}
                                         )
                                     else:
-                                        iteration_response.append("PowerPoint must be opened first")
+                                        memory.add_memory('iteration_response', "PowerPoint must be opened first")
                                         continue
                                 elif operation == "close_powerpoint":
-                                    if powerpoint_opened:
+                                    if memory.is_powerpoint_open:
                                         result = await session.call_tool("close_powerpoint")
-                                        powerpoint_opened = False
+                                        memory.set_powerpoint_state(False)
                                     else:
-                                        iteration_response.append("PowerPoint is not open")
+                                        memory.add_memory('iteration_response', "PowerPoint is not open")
                                         continue
                                 else:
-                                    iteration_response.append(f"Unknown PowerPoint operation: {operation}")
+                                    memory.add_memory('iteration_response', f"Unknown PowerPoint operation: {operation}")
                                     continue
                                 
-                                response_str, iteration_result = format_tool_response(result, iteration)
-                                iteration_response.append(response_str)
-                                last_response = iteration_result
+                                response_str, iteration_result = format_tool_response(result, memory.current_iteration)
+                                memory.add_memory('tool_result', iteration_result)
+                                memory.add_memory('iteration_response', response_str)
                                 
                             except Exception as e:
                                 print(f"Error in PowerPoint operation: {e}")
-                                iteration_response.append(f"Error in PowerPoint operation: {str(e)}")
+                                memory.add_memory('iteration_response', f"Error in PowerPoint operation: {str(e)}")
                                 break
                                 
                         elif response_json.type == 'final_answer':
                             value = response_json.value
-                            iteration_response.append(f"Final answer: {value}")
+                            memory.add_memory('iteration_response', f"Final answer: {value}")
                             break
                             
-                        iteration += 1
+                        memory.increment_iteration()
                         
-                    if iteration >= max_iterations:
+                    if memory.current_iteration >= max_iterations:
                         print("Reached maximum iterations")
                         break
                         
                     print("\nFinal Results:")
-                    for resp in iteration_response:
-                        print(resp)
+                    for resp in memory.get_recent_memories(type='iteration_response'):
+                        print(resp.content)
                         
                     return
                     
