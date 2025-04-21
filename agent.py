@@ -1,4 +1,5 @@
 import os
+import sys
 from dotenv import load_dotenv
 from mcp import ClientSession, StdioServerParameters, types
 from mcp.client.stdio import stdio_client
@@ -11,13 +12,15 @@ from perception import (
     clean_llm_response, parse_and_validate_response, format_tool_response
 )
 from memory import Memory
+from decision import DecisionMaker
 from prompt_config import MATH_AGENT_SYSTEM_PROMPT
 
 # Setup logger
 logger = setup_logger('ai_agent', 'ai_agent.log')
 
-# Initialize global memory
+# Initialize global memory and decision maker
 memory = Memory()
+decision_maker = DecisionMaker()
 
 # Load environment variables from .env file
 logger.info('Loading environment variables')
@@ -66,6 +69,7 @@ def reset_state():
     """Reset all state using memory layer"""
     logger.debug('Resetting global state')
     memory.reset()
+    decision_maker.reset()
     logger.info('Global state reset completed')
 
 async def main():
@@ -151,32 +155,52 @@ async def main():
                     while memory.current_iteration < max_iterations:
                         print(f"\n--- Iteration {memory.current_iteration + 1} ---")
                         
+                        # Get next action from decision maker
+                        current_state = {
+                            "iteration": memory.current_iteration,
+                            "powerpoint_open": memory.is_powerpoint_open,
+                            "last_response": memory.last_response
+                        }
+                        
+                        next_action = await decision_maker.decide_next_action(current_state)
+                        if not next_action or not decision_maker.validate_decision(next_action):
+                            logger.error("Invalid or no decision returned")
+                            break
+
+                        # If we have a final answer, we're done
+                        if next_action["type"] == "final_answer":
+                            value = next_action["value"]
+                            memory.add_memory('iteration_response', f"Final answer: {value}")
+                            print("\nFinal Results:")
+                            for resp in memory.get_recent_memories(type='iteration_response'):
+                                print(resp.content)
+                            return
+
                         # Get context from memory for the prompt
                         context = memory.get_context_for_prompt()
                         current_query = query if not context else f"{query}\n\n{context}"
 
+                        # Prepare prompt with current phase information
+                        phase_context = ""
+                        if "phase" in next_action:
+                            phase_context = f"\nCurrent phase: {next_action['phase']}"
+                            if "status" in next_action:
+                                phase_context += f"\nStatus: {next_action['status']}"
+                        prompt = f"{system_prompt}\n\nQuery: {current_query}{phase_context}"
+
                         # Get model's response with timeout
-                        print("Preparing to generate LLM response...")
-                        prompt = f"{system_prompt}\n\nQuery: {current_query}"
                         try:
                             response = await generate_with_timeout(client, prompt)
                             response_text = clean_llm_response(response.text)
                             print(f"LLM Response: {response_text}")
-                            
-                            # Store LLM response in memory
                             memory.add_memory('llm_response', response_text)
-                            
-                            # Parse and validate the response
-                            try:
-                                response_json = parse_and_validate_response(response_text)
-                            except Exception as e:
-                                print(f"Failed to parse response: {e}")
-                                break
+                            response_json = parse_and_validate_response(response_text)
                             
                         except Exception as e:
-                            print(f"Failed to get LLM response: {e}")
+                            logger.error(f"Failed to get or parse LLM response: {e}")
                             break
 
+                        # Handle function calls and PowerPoint operations
                         if response_json.type == 'function_call':
                             func_name = response_json.function
                             params = response_json.params
@@ -328,7 +352,7 @@ async def main():
                             value = response_json.value
                             memory.add_memory('iteration_response', f"Final answer: {value}")
                             break
-                            
+                        
                         memory.increment_iteration()
                         
                     if memory.current_iteration >= max_iterations:
