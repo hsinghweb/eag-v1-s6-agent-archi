@@ -332,6 +332,8 @@ async def main():
                                     if memory.is_powerpoint_open:
                                         result = await session.call_tool("close_powerpoint")
                                         memory.set_powerpoint_state(False)
+                                        # Update visualization complete state after closing PowerPoint
+                                        decision_maker.visualization_complete = True
                                     else:
                                         memory.add_memory('iteration_response', "PowerPoint is not open")
                                         continue
