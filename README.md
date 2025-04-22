@@ -1,6 +1,6 @@
 # MCP (Mathematical Computation and Presentation) System
 
-A sophisticated mathematical computation system with integrated PowerPoint visualization capabilities. The system leverages AI-driven natural language processing to perform complex mathematical operations and automatically generate visual presentations of the results. Built with three synergistic components, it offers a seamless workflow from mathematical computation to visual representation.
+A sophisticated mathematical computation system with integrated PowerPoint visualization capabilities. The system leverages AI-driven natural language processing to perform complex mathematical operations and automatically generate visual presentations of the results. Built with modular components, it offers a seamless workflow from mathematical computation to visual representation.
 
 ## Components
 
@@ -16,34 +16,44 @@ A sophisticated mathematical computation system with integrated PowerPoint visua
   - Add and format text
   - Automated presentation handling
 
-### MCP Client (mcp-client.py)
-- Establishes connection with the MCP server
-- Demonstrates usage of server tools
-- Example implementation shows:
-  - Converting text to ASCII values
-  - Calculating exponential sums
-  - Creating PowerPoint presentations with results
+### Action Layer (action.py)
+- Handles all tool execution and PowerPoint operations
+- Manages tool parameter validation and conversion
+- Provides clean interface for function calls and PowerPoint manipulation
+- Maintains state of PowerPoint operations
 
-### AI Agent (ai-agent.py)
+### AI Agent (agent.py)
 - Provides intelligent natural language interface for mathematical operations
+- Takes user input queries through console interface
 - Performs step-by-step mathematical reasoning and problem-solving
 - Executes complex mathematical computations with detailed explanations
 - Automatically generates PowerPoint visualizations of mathematical results
 - Maintains a structured workflow from computation to presentation
 
+### Support Components
+- Decision Layer (decision.py): Handles action decision making and validation
+- Memory Layer (memory.py): Manages state and historical context
+- Perception Layer (perception.py): Handles response parsing and validation
+- Logger Configuration (logger_config.py): Provides structured logging across components
+
 ## Setup and Usage
 
 1. Ensure Python is installed on your system
-2. Run the server:
+2. Install required dependencies:
+   ```
+   pip install mcp python-pptx pywinauto google-cloud-aiplatform python-dotenv
+   ```
+3. Configure environment variables:
+   - Create a .env file with your GEMINI_API_KEY
+4. Run the server:
    ```
    python mcp-server.py dev
    ```
-3. Run either the client or AI agent:
+5. Run the AI agent:
    ```
-   python mcp-client.py
-   # or
-   python ai-agent.py
+   python agent.py
    ```
+6. Enter your mathematical query when prompted
 
 ## Example Operations
 
@@ -64,4 +74,9 @@ A sophisticated mathematical computation system with integrated PowerPoint visua
 
 - Python 3.x
 - PowerPoint installation (for presentation features)
-- Required Python packages (mcp, pywinauto, python-pptx)
+- Required Python packages:
+  - mcp
+  - python-pptx
+  - pywinauto
+  - google-cloud-aiplatform
+  - python-dotenv
