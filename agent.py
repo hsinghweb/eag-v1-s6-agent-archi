@@ -13,6 +13,7 @@ from perception import (
 )
 from memory import Memory
 from decision import DecisionMaker
+from action import Action
 from prompt_config import MATH_AGENT_SYSTEM_PROMPT
 
 # Setup logger
@@ -109,6 +110,10 @@ async def main():
                     except Exception as e:
                         logger.error(f"Failed to get tool list: {str(e)}")
                         continue
+
+                    # Initialize action layer with session and tools
+                    action = Action(session)
+                    action.set_tools(tools)
                     
                     # Create system prompt with available tools
                     print("Creating system prompt...")
@@ -200,156 +205,11 @@ async def main():
                             logger.error(f"Failed to get or parse LLM response: {e}")
                             break
 
-                        # Handle function calls and PowerPoint operations
+                        # Execute action based on response type
                         if response_json.type == 'function_call':
-                            func_name = response_json.function
-                            params = response_json.params
-                            
-                            print(f"[Calling Tool] Function name: {func_name}")
-                            print(f"[Calling Tool] Parameters: {params}")
-                            
-                            try:
-                                # Find the matching tool to get its input schema
-                                tool = next((t for t in tools if t.name == func_name), None)
-                                if not tool:
-                                    print(f"[Calling Tool] Available tools: {[t.name for t in tools]}")
-                                    raise ValueError(f"Unknown tool: {func_name}")
-
-                                print(f"[Calling Tool] Found tool: {tool.name}")
-                                print(f"[Calling Tool] Tool schema: {tool.inputSchema}")
-
-                                # Prepare arguments according to the tool's input schema
-                                arguments = {}
-                                schema_properties = tool.inputSchema.get('properties', {})
-                                print(f"[Calling Tool] Schema properties: {schema_properties}")
-
-                                for param_name, param_info in schema_properties.items():
-                                    # Use the correct parameter name from the tool's schema
-                                    param_value = params.get(param_name, params.get('numbers')) if func_name == 'int_list_to_exponential_sum' else params.get(param_name)
-                                    
-                                    if param_value is None:  # Check if parameter is provided
-                                        if param_name in tool.inputSchema.get('required', []):
-                                            raise ValueError(f"Required parameter {param_name} not provided for {func_name}")
-                                        continue
-                                        
-                                    param_type = param_info.get('type', 'string')
-                                    
-                                    print(f"[Calling Tool] Converting parameter {param_name} with value {param_value} to type {param_type}")
-                                    
-                                    # Convert the value to the correct type based on the schema
-                                    if param_type == 'integer':
-                                        arguments[param_name] = int(param_value)
-                                    elif param_type == 'number':
-                                        arguments[param_name] = float(param_value)
-                                    elif param_type == 'array':
-                                        logger.debug(f"Processing array parameter {param_name} with value {param_value}")
-                                        try:
-                                            # Handle result from strings_to_chars_to_int function
-                                            if isinstance(param_value, (list, tuple)):
-                                                arguments[param_name] = [int(x) for x in param_value]
-                                            elif isinstance(param_value, str):
-                                                # Handle string representation of array
-                                                if param_value.startswith('[') and param_value.endswith(']'):
-                                                    array_str = param_value.strip('[]')
-                                                    arguments[param_name] = [int(x.strip()) for x in array_str.split(',')] if array_str else []
-                                                else:
-                                                    # Handle comma-separated string without brackets
-                                                    arguments[param_name] = [int(x.strip()) for x in param_value.split(',')] if ',' in param_value else [int(param_value)]
-                                            else:
-                                                logger.error(f"Invalid type for array parameter {param_name}: {type(param_value)}")
-                                                raise ValueError(f"Invalid array format for parameter {param_name}")
-                                        except (ValueError, TypeError) as e:
-                                            logger.error(f"Error converting value to array: {str(e)}")
-                                            raise ValueError(f"Failed to convert {param_value} to integer array: {str(e)}")
-                                    else:
-                                        arguments[param_name] = str(param_value)
-
-                                print(f"[Calling Tool] Final arguments: {arguments}")
-                                print(f"[Calling Tool] Calling tool {func_name}")
-                                
-                                result = await session.call_tool(func_name, arguments=arguments)
-                                print(f"[Calling LLM] Raw result: {result}")
-                                
-                                response_str, iteration_result = format_tool_response(result, memory.current_iteration, func_name, arguments)
-                                memory.add_memory('tool_result', iteration_result)
-                                memory.add_memory('iteration_response', response_str)
-
-                            except Exception as e:
-                                print(f"[Calling LLM] Error details: {str(e)}")
-                                print(f"[Calling LLM] Error type: {type(e)}")
-                                import traceback
-                                traceback.print_exc()
-                                memory.add_memory('iteration_response', f"Error in iteration {memory.current_iteration + 1}: {str(e)}")
-                                break
-
+                            await action.execute_function_call(response_json.function, response_json.params)
                         elif response_json.type == 'powerpoint':
-                            operation = response_json.operation
-                            params = response_json.params
-                            
-                            print(f"[Calling Tool] PowerPoint operation: {operation}")
-                            print(f"[Calling Tool] PowerPoint parameters: {params}")
-                            
-                            try:
-                                if operation == "open_powerpoint":
-                                    if not memory.is_powerpoint_open:
-                                        result = await session.call_tool("open_powerpoint")
-                                        memory.set_powerpoint_state(True)
-                                    else:
-                                        memory.add_memory('iteration_response', "PowerPoint is already open")
-                                        continue
-                                elif operation == "draw_rectangle":
-                                    if memory.is_powerpoint_open:
-                                        try:
-                                            result = await session.call_tool(
-                                                "draw_rectangle",
-                                                arguments=params
-                                            )
-                                        except Exception as e:
-                                            print(f"[Calling Tool] Error with rectangle parameters: {e}")
-                                            memory.add_memory('iteration_response', f"Error: Invalid rectangle parameters - {str(e)}")
-                                            continue
-                                    else:
-                                        memory.add_memory('iteration_response', "PowerPoint must be opened first")
-                                        continue
-                                elif operation == "add_text_in_powerpoint":
-                                    if memory.is_powerpoint_open:
-                                        text = params.get('text', '')
-                                        
-                                        # If this is the final result text, append the calculated value
-                                        if "Final Result:" in text:
-                                            calc_result = memory.get_last_calculation_result()
-                                            if calc_result:
-                                                text = f"Final Result:\n{calc_result}"
-                                        
-                                        result = await session.call_tool(
-                                            "add_text_in_powerpoint",
-                                            arguments={"text": text}
-                                        )
-                                    else:
-                                        memory.add_memory('iteration_response', "PowerPoint must be opened first")
-                                        continue
-                                elif operation == "close_powerpoint":
-                                    if memory.is_powerpoint_open:
-                                        result = await session.call_tool("close_powerpoint")
-                                        memory.set_powerpoint_state(False)
-                                        # Update visualization complete state after closing PowerPoint
-                                        decision_maker.visualization_complete = True
-                                    else:
-                                        memory.add_memory('iteration_response', "PowerPoint is not open")
-                                        continue
-                                else:
-                                    memory.add_memory('iteration_response', f"Unknown PowerPoint operation: {operation}")
-                                    continue
-                                
-                                response_str, iteration_result = format_tool_response(result, memory.current_iteration)
-                                memory.add_memory('tool_result', iteration_result)
-                                memory.add_memory('iteration_response', response_str)
-                                
-                            except Exception as e:
-                                print(f"Error in PowerPoint operation: {e}")
-                                memory.add_memory('iteration_response', f"Error in PowerPoint operation: {str(e)}")
-                                break
-                                
+                            await action.execute_powerpoint_operation(response_json.operation, response_json.params)
                         elif response_json.type == 'final_answer':
                             value = response_json.value
                             memory.add_memory('iteration_response', f"Final answer: {value}")
